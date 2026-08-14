@@ -118,11 +118,6 @@ export class AnalysisService extends Service {
             return
         }
 
-        // 特权用户不做自动画像分析（保护隐私）
-        if (this.config.personaWhitelist?.includes(session.userId)) {
-            return
-        }
-
         // 黑名单用户不做画像分析
         if (this.config.personaBlacklist?.includes(session.userId)) {
             return
@@ -307,7 +302,10 @@ export class AnalysisService extends Service {
         }
     ): Promise<StoredMessage[]> {
         const results: StoredMessage[] = []
-        const relevantGroups = this.config.enableAllGroupsByDefault
+        const useOnlyCurrentGroup =
+            this.config.personaOnlyCurrentGroup ||
+            this.config.enableAllGroupsByDefault
+        const relevantGroups = useOnlyCurrentGroup
             ? [
                   {
                       enabled: true,
@@ -330,7 +328,7 @@ export class AnalysisService extends Service {
               )
 
         if (!relevantGroups.length) {
-            const reason = this.config.enableAllGroupsByDefault
+            const reason = useOnlyCurrentGroup
                 ? '未提供可用的当前群组信息'
                 : '未在配置中找到监听群组'
             this.ctx.logger.warn(

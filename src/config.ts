@@ -54,6 +54,7 @@ export interface Config {
     personaViewAuthority: number
     personaWhitelist: string[]
     personaBlacklist: string[]
+    personaOnlyCurrentGroup: boolean
     theme: 'light' | 'dark' | 'auto'
     skin: string
 
@@ -216,6 +217,9 @@ export const Config: Schema<Config> = Schema.intersect([
             .max(4)
             .step(1)
             .default(3),
+        personaOnlyCurrentGroup: Schema.boolean()
+            .description('用户画像是否只统计当前群内容。开启后仅分析触发群的消息，关闭则汇总所有监听群的消息。')
+            .default(false),
         personaWhitelist: Schema.array(String)
             .role('table')
             .description('特权用户 ID。特权用户可查看他人画像且不受权限限制，同时其他人无法查看特权用户的画像。')
