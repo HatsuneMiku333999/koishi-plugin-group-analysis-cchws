@@ -118,6 +118,11 @@ export class AnalysisService extends Service {
             return
         }
 
+        // 特权用户不做自动画像分析（保护隐私）
+        if (this.config.personaWhitelist?.includes(session.userId)) {
+            return
+        }
+
         // 黑名单用户不做画像分析
         if (this.config.personaBlacklist?.includes(session.userId)) {
             return
@@ -412,36 +417,54 @@ export class AnalysisService extends Service {
 
         const evidenceEntries = persona.evidence
         const messageIndex: Record<string, StoredMessage> = {}
+        const contentIndex: Record<string, StoredMessage> = {}
+
+        const getText = (msg: StoredMessage): string =>
+            h
+                .select(
+                    msg.elements || [h.text(msg.content)],
+                    'text'
+                )
+                .toString()
+                .trim()
 
         for (const message of messages) {
-            const key = message.messageId || message.id
-            if (key && !messageIndex[key]) {
+            if (message.messageId && !messageIndex[message.messageId]) {
                 messageIndex[message.messageId] = message
+            }
+            if (message.id && !messageIndex[message.id]) {
                 messageIndex[message.id] = message
+            }
+            const text = getText(message)
+            if (text && !contentIndex[text]) {
+                contentIndex[text] = message
             }
         }
 
         const updated: string[] = []
 
         for (const entry of evidenceEntries) {
-            const resolvedMessage: StoredMessage | undefined =
-                messageIndex[entry]
+            const rawEntry = String(entry).trim()
+            // 1) 优先按 ID 匹配
+            let resolvedMessage: StoredMessage | undefined =
+                messageIndex[rawEntry]
+
+            // 2) 再按内容原文匹配（模型有时返回的是消息文本而非 ID）
+            if (!resolvedMessage && contentIndex[rawEntry]) {
+                resolvedMessage = contentIndex[rawEntry]
+            }
 
             if (resolvedMessage) {
-                updated.push(
-                    h
-                        .select(
-                            resolvedMessage.elements || [
-                                h.text(resolvedMessage.content)
-                            ],
-                            'text'
-                        )
-                        .toString()
-                )
+                updated.push(getText(resolvedMessage))
             } else {
-                this.ctx.logger.warn(
-                    `无法找到画像证据 ${entry} 对应的消息，请检查消息服务是否正常。`
-                )
+                // 3) 都匹配不上，直接把原文作为引用（如果看起来像一句话）
+                if (rawEntry.length > 0) {
+                    updated.push(rawEntry)
+                } else {
+                    this.ctx.logger.warn(
+                        `无法找到画像证据 ${entry} 对应的消息，请检查消息服务是否正常。`
+                    )
+                }
             }
         }
 
