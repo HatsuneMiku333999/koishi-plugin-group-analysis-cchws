@@ -908,6 +908,80 @@ export class AnalysisService extends Service {
         }
     }
 
+    public async executeCustomAnalysis(
+        session: Session,
+        target: AnalysisTarget,
+        prompt: string,
+        days: number
+    ) {
+        const bot = this._getBot(session.selfId)
+        const targetChannel = target.channelId ?? target.guildId
+        const targetGuildContext =
+            target.channelId && target.guildId ? target.guildId : undefined
+
+        if (!targetChannel) {
+            this.ctx.logger.warn('执行自定义分析需要提供 channelId 或 guildId。')
+            return
+        }
+
+        const sendStatus = async (content: string | h) =>
+            bot?.sendMessage(targetChannel, content, targetGuildContext)
+
+        this.ctx.logger.info(
+            `收到自定义提示词分析请求 (群: ${targetChannel}，范围: 近 ${days} 天): ${prompt}`
+        )
+
+        try {
+            await sendStatus(
+                `开始使用自定义提示词分析近 ${days} 天的聊天记录，请稍候...`
+            )
+
+            const messages = await this._getGroupHistoryFromMessageService(
+                session.selfId,
+                target,
+                days
+            )
+
+            if (messages.length < this.config.minMessages) {
+                await sendStatus(
+                    `消息数量（${messages.length}/${this.config.minMessages}）不足于进行有效分析。`
+                )
+                return
+            }
+
+            const { allMessagesText } = calculateBasicStats(messages)
+            const messagesText = allMessagesText.join('\n')
+
+            this.ctx.logger.info(
+                `自定义分析已获取 ${messages.length} 条消息，开始调用 LLM。`
+            )
+
+            const result =
+                await this.ctx.group_analysis_llm.runCustomAnalysis(
+                    prompt,
+                    messagesText
+                )
+
+            this.ctx.logger.info('自定义分析完成，开始发送结果。')
+            for (const chunk of this._splitTextForSend(result)) {
+                await sendStatus(h.text(chunk))
+            }
+        } catch (error) {
+            this.ctx.logger.error(
+                `为群组 ${target.guildId || target.channelId} 执行自定义分析时发生错误:`,
+                error
+            )
+            const errorMessage =
+                error instanceof Error ? error.message : '未知错误。'
+
+            await sendStatus(
+                h.text(
+                    `自定义分析失败: ${errorMessage}。请检查网络连接和 LLM 配置，或联系管理员。`
+                )
+            )
+        }
+    }
+
     public async executeAutoAnalysisForEnabledGroups() {
         const enabledGroups = this.config.listenerGroups.filter(
             (group) => group.enabled
@@ -1194,6 +1268,41 @@ export class AnalysisService extends Service {
 
         this.ctx.logger.info('消息分析完成。')
         return result
+    }
+
+    private _splitTextForSend(text: string, chunkSize = 2000): string[] {
+        const trimmed = text.trim()
+        if (!trimmed) return []
+        if (trimmed.length <= chunkSize) return [trimmed]
+
+        const chunks: string[] = []
+        let current = ''
+
+        for (const line of trimmed.split('\n')) {
+            // 单行本身超长时，先按 chunkSize 切成多段（切分而非丢弃）
+            if (line.length > chunkSize) {
+                if (current) {
+                    chunks.push(current)
+                    current = ''
+                }
+                for (let i = 0; i < line.length; i += chunkSize) {
+                    chunks.push(line.slice(i, i + chunkSize))
+                }
+                continue
+            }
+
+            // 优先按行边界累积切分，不劈开单行
+            if (current && current.length + line.length + 1 > chunkSize) {
+                chunks.push(current)
+                current = line
+            } else {
+                current = current ? `${current}\n${line}` : line
+            }
+        }
+
+        if (current) chunks.push(current)
+
+        return chunks
     }
 
     private _getBot(selfId: string) {

@@ -55,6 +55,9 @@ export interface Config {
     personaWhitelist: string[]
     personaBlacklist: string[]
     personaOnlyCurrentGroup: boolean
+    customPromptEnabled: boolean
+    customPrompt: string
+    customPromptDays: number
     theme: 'light' | 'dark' | 'auto'
     skin: string
 
@@ -135,6 +138,25 @@ export const Config: Schema<Config> = Schema.intersect([
             .description('最多生成的金句数量。')
             .default(3)
     }).description('群分析设置'),
+    Schema.object({
+        customPromptEnabled: Schema.boolean()
+            .description(
+                '启用后，群分析 主命令（含 -g/-c 指定目标群）将直接使用下方自定义提示词分析聊天记录：仅一次 LLM 调用，不使用内置话题/称号/金句/画像模板；自然语言查询参数将被忽略。'
+            )
+            .default(false),
+        customPrompt: Schema.string()
+            .role('textarea')
+            .description(
+                '自定义提示词内容。聊天记录会附加在提示词之后一并发给 LLM，结果以纯文本分段发送到群里。'
+            )
+            .default(''),
+        customPromptDays: Schema.number()
+            .description('使用自定义提示词分析的时间窗口（天）。')
+            .min(1)
+            .max(7)
+            .step(1)
+            .default(1)
+    }).description('自定义提示词设置'),
     Schema.object({
         outputFormat: Schema.union([
             Schema.const('image').description('图片'),
@@ -467,7 +489,7 @@ targetTime:
     }).description('高级设置')
 ])
 
-export const name = 'group-analysis'
+export const name = 'group-analysis-mx-cchws'
 
 export const inject = {
     required: ['puppeteer', 'database']

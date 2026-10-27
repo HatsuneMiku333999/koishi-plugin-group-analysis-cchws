@@ -72,7 +72,26 @@ export function apply(ctx: Context, config: Config) {
                 typeof query === 'string' ? query.trim() : undefined
 
             try {
-                if (queryText) {
+                if (config.customPromptEnabled) {
+                    const customPrompt = config.customPrompt?.trim()
+                    if (!customPrompt) {
+                        return '自定义提示词开关已开启，但提示词内容为空，请先在插件配置中填写自定义提示词。'
+                    }
+                    if (queryText) {
+                        ctx.logger.info(
+                            `自定义提示词模式已开启，忽略查询参数: ${queryText}`
+                        )
+                    }
+                    await ctx.group_analysis.executeCustomAnalysis(
+                        session,
+                        {
+                            guildId: targetGuildId || undefined,
+                            channelId: targetChannelId || undefined
+                        },
+                        customPrompt,
+                        config.customPromptDays || 1
+                    )
+                } else if (queryText) {
                     await ctx.group_analysis.executeGroupQuery(
                         session,
                         {
@@ -227,6 +246,76 @@ export function apply(ctx: Context, config: Config) {
 
             const enabled = originalGroupSetting?.enabled ? '已启用' : '未启用'
             return `当前群 ${guildName} (${guildId}) 分析功能状态: ${enabled}`
+        })
+
+    settings
+        .subcommand('.custom <prompt:text>', '使用自定义提示词直接分析本群聊天记录')
+        .alias('.自定义')
+        .usage(
+            '使用你自己的提示词分析本群聊天记录，结果为纯文本，全程只调用一次 LLM。\n' +
+                '用法：/群分析.自定义 -d <天数> <你的提示词>\n' +
+                '例如：/群分析.自定义 提取群聊中所有用户提出的问题\n' +
+                '天数默认 1 天，最多 7 天。'
+        )
+        .option('days', '-d <days:number> 分析的天数范围（默认 1，最多 7）', {
+            fallback: 1
+        })
+        .option('group', '-g <guildId:string> 指定群号', {
+            authority: 3
+        })
+        .option('channel', '-c <channelId:string> 指定频道号', {
+            authority: 3
+        })
+        .action(async ({ session, options }, prompt) => {
+            if (config.personaBlacklist.includes(session.userId)) {
+                return '您无权使用本插件。'
+            }
+
+            const promptText = typeof prompt === 'string' ? prompt.trim() : ''
+            if (!promptText) {
+                return '请提供自定义提示词。例如：/群分析.自定义 提取群聊中所有用户提出的问题'
+            }
+
+            if (session.isDirect && !options.group && !options.channel) {
+                return '私聊中请使用 -g 或 -c 指定目标群或频道。'
+            }
+
+            const targetGuildId = options.group ?? session.guildId ?? undefined
+            const targetChannelId =
+                options.channel ?? session.channelId ?? undefined
+
+            if (!targetGuildId && !targetChannelId) {
+                return '请使用 -g 或 -c 指定目标群或频道。'
+            }
+
+            if (
+                !checkGroup(session, {
+                    guildId: targetGuildId,
+                    channelId: targetChannelId
+                })
+            )
+                return '目标群未启用分析功能，请使用 群分析.启用 来启用目标群的分析功能。'
+
+            const days = Math.floor(options.days)
+            if (!Number.isFinite(days) || days < 1) {
+                return '请输入有效的天数（-d <天数>），最小为 1 天。'
+            }
+            if (days > 7) return '出于性能考虑，最多只能分析 7 天的数据。'
+
+            try {
+                await ctx.group_analysis.executeCustomAnalysis(
+                    session,
+                    {
+                        guildId: targetGuildId || undefined,
+                        channelId: targetChannelId || undefined
+                    },
+                    promptText,
+                    days
+                )
+            } catch (err) {
+                ctx.logger.error('执行自定义分析时发生未捕获的错误:', err)
+                return '自定义分析执行失败，请检查日志。'
+            }
         })
 
     ctx.command('用户画像 [user:user]', '查看指定用户的画像')

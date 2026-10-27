@@ -270,6 +270,17 @@ export class LLMService extends Service {
 
         return this._callText(prompt, '群分析对话回复')
     }
+
+    public async runCustomAnalysis(
+        userPrompt: string,
+        messagesText: string
+    ): Promise<string> {
+        const prompt =
+            `${userPrompt.trim()}\n\n` +
+            '以下是群聊记录（每行格式为 昵称(userId): 消息内容）：\n' +
+            messagesText
+        return this._callText(prompt, '自定义提示词分析')
+    }
 }
 
 declare module 'koishi' {
